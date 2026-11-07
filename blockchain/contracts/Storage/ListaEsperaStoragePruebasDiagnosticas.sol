@@ -1,0 +1,258 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.10;
+
+import "../ListaEsperaTypes.sol";
+import "../ListaEsperaCommonFunctions.sol";
+
+contract ListaEsperaStoragePruebasDiagnosticas{
+
+    /*
+        Este contrato sirve para guardar los datos del sistema entero. Los declaro como private porque aunque estará en una  blockchain publica 
+        y se podrán leer los datos, quiero evitar que alguien desde otro contrato modifique las variables directamente con 
+            contato.admin = "0x123434545645645"
+        Tendrán que pasar obligatoriamente por la función de set y get que les ofrezco ( una especie de api )
+    */
+
+    bool private activo;
+
+    address private immutable owner;
+
+    uint256 nextIdPrueba;
+
+
+    // Para cada idPrueba, obtenemos los datos enteros de la PruebaDiagnostica
+    mapping ( uint256 => PruebaDiagnostica) private pruebasDiagnosticas;
+
+    // Para cada idPaciente, obtenemos los ids de las Pruebas diagnosticas para buscarlo en el anterior mapping.
+    mapping ( string => uint256[] ) private pruebasPorPaciente;
+    // Para cada centro (address de centro) obtenemos la lista de idPrueba que nos permite obtener la prueba 
+    mapping ( address => uint256[] ) private pruebasPorCentro;
+
+    // Modifiers ********************************************************************************************************************************
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Solo el owner puede ejecutar la funcionalidad");
+        _;
+    }
+
+    modifier activeContract() {
+        require(activo, "El contrato no esta activo");
+        _;
+    }
+
+
+    // Constructor
+    constructor(address _owner) {
+        require(_owner != address(0), "owner es zero");
+        owner = _owner;
+        activo = true;
+        nextIdPrueba = 0;
+    }
+
+    // Funciones para activar y desactivar  el contrato ************************************************************************
+    function enable() public onlyOwner {
+        require (activo == false, "El contrato ya esta activo");
+
+        activo = true;
+
+    }
+
+    function disable() public onlyOwner {
+        require (activo, "El contrato ya esta desactivado");
+
+        activo = false;
+    }
+
+    // Funciones sobre los centros ****************************************************************************
+
+    // Funciones sobre las pruebas diagnosticas ******************************************************************************************
+    function existePrueba(uint256 _idPrueba) public view onlyOwner returns (bool) {
+        if (pruebasDiagnosticas[_idPrueba].idPrueba != 0){
+            return true;
+        }
+        return false;
+    }
+
+    function esPruebaActiva(uint256 _idPrueba) public view onlyOwner returns (bool) {
+        require(pruebasDiagnosticas[_idPrueba].idPrueba != 0, "La prueba no existe");
+        return pruebasDiagnosticas[_idPrueba].activa;
+    }
+
+    function tieneRedireccion(uint256 _idPrueba) public view onlyOwner returns (bool)
+    {
+        require(pruebasDiagnosticas[_idPrueba].idPrueba != 0, "La prueba no existe");
+        return pruebasDiagnosticas[_idPrueba].propuestaRedireccion;
+    }
+
+    function esCentroDestinoRedireccion(uint256 _idPrueba, address _centroDestino) public view onlyOwner returns (bool) {
+        if (pruebasDiagnosticas[_idPrueba].idPrueba != 0){
+            return pruebasDiagnosticas[_idPrueba].centroDestinoRedireccion == _centroDestino;
+        }
+        revert("La prueba no existe");
+        
+    }
+
+    function nuevaRedireccion(uint256 _idPrueba, address _sender, address _nuevoCentro) public onlyOwner {
+        require(esPruebaActiva(_idPrueba), "La prueba no esta activa");
+        require(tieneRedireccion(_idPrueba) == false, "La prueba  ya tiene redireccion");
+
+        PruebaDiagnostica storage prueba = pruebasDiagnosticas[_idPrueba];
+        require(_sender == prueba.centroRealizador, "La solicitud la ha hecho un centro que no es el realizador");
+        prueba.propuestaRedireccion = true;
+        prueba.centroDestinoRedireccion = _nuevoCentro;
+    }
+
+    function eliminaRedireccion(uint256 _idPrueba, bool aceptada) public onlyOwner {
+        require(esPruebaActiva(_idPrueba), "La prueba no esta activa");
+        require(tieneRedireccion(_idPrueba) == true, "La prueba  NO tiene redireccion");
+
+        PruebaDiagnostica storage prueba = pruebasDiagnosticas[_idPrueba];
+        if (aceptada) {
+            // Hay que actualizar las pruebas por centro.
+            //Primero borro la antigua
+            uint256[] storage pruebasPorCentroOrigen = pruebasPorCentro[prueba.centroRealizador];
+            for (uint i = 0;i < pruebasPorCentroOrigen.length; i++) {
+                    if (pruebasPorCentroOrigen[i] == _idPrueba) {
+                        /*
+                            EL delete solo pone el valor de la variable a default pero no elimina la posicion del vector, no lo haec mas corto.
+                            Para eso tenemos que mover el valor a la ultima posicion y hacer un pop.
+                        */
+                        if (i != pruebasPorCentroOrigen.length - 1) {
+                            // Machaco la posicion actual por la ultima
+                            pruebasPorCentroOrigen[i] = pruebasPorCentroOrigen[pruebasPorCentroOrigen.length - 1];
+                        }
+                        // Hago pop para eliminar del vector la ultima posicion, ahora el vector será más croto
+                        pruebasPorCentroOrigen.pop();
+                        break;
+                    }
+            }
+            // Ahora hago push de la nueva prueba.
+            pruebasPorCentro[prueba.centroDestinoRedireccion].push(_idPrueba);
+            // hecho
+            prueba.centroRealizador = prueba.centroDestinoRedireccion;
+        }
+        prueba.centroDestinoRedireccion = address(0);
+        prueba.propuestaRedireccion = false;
+    }
+
+    function getPruebaDiagnostica(uint _idPrueba) public view onlyOwner returns (PruebaDiagnostica memory) {
+        require(nextIdPrueba > 0, "No hay registradas ninguna  prueba");
+        require(pruebasDiagnosticas[_idPrueba].idPrueba != 0, "No esiste la prueba reclamada");
+        return pruebasDiagnosticas[_idPrueba];
+    }
+
+    // RECUERDA!!! el msg.sender será el contrato de implementacion por lo que siempre hay que pasar el address del wallet que lo ejecuta.
+    // Creo y añado una prueba diagnostica a la lista de espera.
+    function altaPruebaDiagnostica(
+        address _centroRealizador, 
+        string calldata _idPaciente, 
+        string calldata _diagnostico,
+        string calldata _codigoPrueba,
+        uint16  _maximoDiasDemora,
+        uint256 _timestampAlta
+        ) public  onlyOwner activeContract returns (uint256) {
+
+        //La larga lista de validaciones
+        require(isEmptyString(_idPaciente) == false, "El id del paciente no puede estar vacio");
+        require(isEmptyString(_diagnostico) == false, "El diagnostico no puede estar vacio");
+        require(isEmptyString(_codigoPrueba) == false, "El codigo de prueba no puede estar vacio");
+        require(_maximoDiasDemora > 0, "No se puede agregar a la lista de espera una prueba  con demora maxima 0 dias");
+        require(timeDiffInDays({_newer: block.timestamp ,_older: _timestampAlta }) < 365, "No se pueden agregar pruebas de hace mas de un anyo");
+        // Check que el paciente no tenga la misma prueba solicitada con el mismo diaagnostico.
+        require(_existePruebaEnPaciente(_idPaciente,_diagnostico, _codigoPrueba) == false, "La prueba ya esta solicitada para ese paciente y para la misma causa ");
+
+        // Genero la id de la siguiente prueba para evitar que haya un error y tenga que hacer rollback restando uno.
+        uint256 _nextIdPrueba = nextIdPrueba + 1;
+        //Los campos opcionales los genero con los valores by default para que consten vacios.
+        PruebaDiagnostica memory prueba = PruebaDiagnostica({
+            idPrueba: _nextIdPrueba,
+            idPaciente: _idPaciente,
+            diagnostico: _diagnostico,
+            codigoPrueba: _codigoPrueba,
+            centroRealizador: _centroRealizador,
+            timestampAlta: _timestampAlta,
+            timestampBaja: 0,
+            maximoDiasDemora: _maximoDiasDemora,
+            activa: true,
+            motivoDeBaja: 0,
+            propuestaRedireccion: false,  
+            centroDestinoRedireccion: address(0)
+        });
+
+        pruebasDiagnosticas[_nextIdPrueba] = prueba;
+        // Agrero la prueba a los siguientes mappings
+        pruebasPorCentro[prueba.centroRealizador].push(prueba.idPrueba);
+        pruebasPorPaciente[prueba.idPaciente].push(prueba.idPrueba);
+        //Todo bien, asi que acutalizo el indice de nextIdPrueba global.
+        nextIdPrueba = _nextIdPrueba;
+        return prueba.idPrueba;
+    }  
+
+    // Modificamos una prueba, hacemos 2 funciones una parqa modificar los datos de baja y otra para los datos de la redireccion.
+    function bajaPruebaDiagnostica(address _centroRealizador, uint256 _idPrueba, uint256 _timestampBaja, uint16 _motivoDeBaja) public  onlyOwner activeContract{
+        //Check que exista la prueba 
+        require(pruebasDiagnosticas[_idPrueba].idPrueba != 0, "La prueba no existe");
+        PruebaDiagnostica storage _prueba = pruebasDiagnosticas[_idPrueba];
+        
+        require(_prueba.activa, "Estas intentando modificar una prueba ya dada de baja");
+        if (_centroRealizador != address(0)) {
+            require(_prueba.centroRealizador == _centroRealizador, "No tienes permiso para dar de baja la prueba");
+        }
+        require(_timestampBaja > _prueba.timestampAlta, "La fecha de baja no puede ser anterior a la fecha de alta");
+        require(_timestampBaja <= block.timestamp, "La fecha de baja no puede ser mayor a la fecha actual");
+
+        _prueba.timestampBaja = _timestampBaja;
+        _prueba.motivoDeBaja = _motivoDeBaja;
+
+        _prueba.centroDestinoRedireccion = address(0);
+        _prueba.propuestaRedireccion = false;
+        _prueba.activa = false;
+
+    }
+
+    function pruebaTieneRedireccion(uint256 _idPrueba) public view onlyOwner returns (bool, address) {
+        require(pruebasDiagnosticas[_idPrueba].idPrueba !=  0, "La prueba que nos indicas NO existe");
+        PruebaDiagnostica memory prueba  = pruebasDiagnosticas[_idPrueba];
+        return (prueba.propuestaRedireccion, prueba.centroDestinoRedireccion);
+    }
+
+    // Funciones auxiliares **************************************************************************
+
+    function _existePruebaEnPaciente(
+        string calldata _idPaciente,
+        string calldata _diagnostico, 
+        string calldata _codigoPrueba
+        ) internal view returns (bool)
+        {
+            uint256[] memory pruebasDePaciente = pruebasPorPaciente[_idPaciente];
+            for (uint i = 0; i < pruebasDePaciente.length; i++ ) {
+                PruebaDiagnostica memory prueba = pruebasDiagnosticas[pruebasDePaciente[i]]; 
+                if (compareStrings(prueba.diagnostico, _diagnostico) && 
+                    compareStrings(prueba.codigoPrueba, _codigoPrueba)) {
+                    return true;
+                }
+            }
+            return false;
+    }
+
+    function listaPruebasPorPaciente(string calldata _idPaciente) public view onlyOwner returns (uint256[] memory){
+        return pruebasPorPaciente[_idPaciente];
+    }
+
+    function listaPruebasPorCentro(address _centro) public view onlyOwner returns (uint256[] memory) {
+        return pruebasPorCentro[_centro];
+    }
+
+    // Funciones de exportacion  de datos*******************************************************************
+
+    // pruebasDiagnosticas
+    function exportaPruebasDiagnosticas() public view onlyOwner returns (PruebaDiagnostica[] memory) {
+        PruebaDiagnostica[] memory pruebas = new PruebaDiagnostica[] (nextIdPrueba);
+        //OJO!! que la primera prueba qye introducimos tiene id 1.
+        for (uint i = 1; i <= nextIdPrueba; i++) {
+            pruebas[i - 1] = pruebasDiagnosticas[i];
+        }
+        return pruebas;
+    }
+   
+}
