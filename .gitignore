@@ -1,0 +1,87 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Testing
+/coverage
+.nyc_output
+
+# Build outputs
+/build
+/dist
+/out
+/.next/
+.next/
+next-env.d.ts
+.hardhat
+
+# Blockchain artifacts and cache
+artifacts/
+cache/
+typechain-types/
+typechain/
+
+# Environment variables (NEVER commit these)
+.env
+.env.local
+.env.*.local
+.env*.local
+
+# IDE and editor configs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# TypeScript
+*.tsbuildinfo
+dist/
+.tsc-*
+
+# Remix IDE
+.remixIDE/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# IDE specific files
+.vscode/settings.json
+.vscode/launch.json
+.idea/workspace.xml
+*.sublime-project
+*.sublime-workspace
+
+# Private keys and credentials
+private_key.txt
+*.pem
+*.key
+secrets.json
+
+# Hardhat specific
+hardhat.config.js.bak
